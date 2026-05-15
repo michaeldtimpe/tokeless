@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tokeless"
+version = "0.1.0"
+description = "Standalone test harness for evaluating LLM-context compression mechanisms against luxe-shaped tool-output corpora."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+tokeless = "tokeless.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tokeless"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
