@@ -7,3 +7,18 @@ __pycache__/
 .DS_Store
 dist/
 build/
+
+# Real luxe-trace fixtures captured for Phase 2 validation.
+# Contents may include file paths, API responses, and private-repo source
+# from real luxe runs — must never enter git history. Only the README and
+# per-fixture manifest.json are version-controlled.
+#
+# Pattern explanation: `traces/` (whole dir) cannot be un-ignored at
+# child level. Instead, ignore traces/* (top-level), allow README and
+# subdirectories, then ignore traces/*/* (subdir contents) and allow
+# manifest.json files.
+traces/*
+!traces/README.md
+!traces/*/
+traces/*/*
+!traces/*/manifest.json
