@@ -4,6 +4,16 @@ This directory holds captured luxe-trace JSONL files used to validate
 tokeless compressors against real (non-synthetic) workloads. See
 `~/.claude/plans/drifting-waddling-scott.md` for the full phase plan.
 
+> **All current measurements are harness-validation metrics, not
+> model-behavior conclusions.** Every bytes-saved number tokeless
+> has reported so far is measured against corpora authored to exhibit
+> the redundancy the compressors target — i.e., a tautology. Real-trace
+> verdicts captured into this directory supersede any number measured
+> against synthetic corpora or against the `traces/_synthetic/`
+> archetype generator. If you are reading this and the directory is
+> still empty of real fixtures, every published tokeless number is
+> still synthetic.
+
 ## Directory contract
 
 ```
