@@ -159,6 +159,59 @@ def test_format_table_includes_avg_bytes_per_fire_column():
     assert header_line.index("avg_B/fire") < header_line.index("ratio")
 
 
+def test_evalresult_latency_percentiles_exposed():
+    """Latency percentile properties are wired and computed over items."""
+    corpus = Corpus(
+        name="t",
+        description="",
+        items=[
+            CorpusItem(
+                f"item_{i}",
+                [{"role": "tool", "name": "x", "content": "y" * 100}],
+            )
+            for i in range(5)
+        ],
+    )
+    result = run_eval(corpus, "exact_hash_dedup")
+    # Both properties produce non-negative floats; p95 >= p50
+    assert result.latency_p50_s >= 0
+    assert result.latency_p95_s >= 0
+    assert result.latency_p95_s >= result.latency_p50_s
+
+
+def test_format_table_includes_latency_p50_p95_footer():
+    """Pins the p50/p95 footer line. Format is 'X.YY ms' (two decimals,
+    pinned to prevent snapshot drift).
+    """
+    corpus = Corpus(
+        name="t",
+        description="",
+        items=[
+            CorpusItem(
+                "alpha",
+                [{"role": "tool", "name": "x", "content": "y" * 200}] * 2,
+            )
+        ],
+    )
+    result = run_eval(corpus, "exact_hash_dedup")
+    table = result.format_table()
+    assert "latency p50 ≈" in table
+    assert "p95 ≈" in table
+    assert " ms" in table
+    # The "(computed over corpus items)" parenthetical is load-bearing
+    # — prevents future-you from comparing this against operation-level
+    # luxe telemetry.
+    assert "(computed over corpus items)" in table
+
+
+def test_evalresult_latency_percentiles_empty_returns_zero():
+    """Edge case: empty corpus → 0.0 sentinel (no zero-division)."""
+    from tokeless.eval.runner import EvalResult
+    empty = EvalResult(corpus_name="empty", compressor_id="noop")
+    assert empty.latency_p50_s == 0.0
+    assert empty.latency_p95_s == 0.0
+
+
 def test_format_table_includes_per_item_and_total_rows():
     corpus = Corpus(
         name="t",

@@ -101,6 +101,12 @@ class ComparisonReport:
             f"{self.treatment.totals.bytes_saved_per_fire} B"
         )
         lines.append(
+            f"  treatment latency p50 ≈ "
+            f"{self.treatment.latency_p50_s * 1000:.2f} ms, "
+            f"p95 ≈ {self.treatment.latency_p95_s * 1000:.2f} ms "
+            f"(computed over corpus items)"
+        )
+        lines.append(
             f"  treatment fired on "
             f"{self.treatment.fired_on}/{len(self.treatment.items)} items "
             f"({self.treatment.firing_rate * 100:.1f}%)"

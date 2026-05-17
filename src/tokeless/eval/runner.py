@@ -12,6 +12,7 @@ from tokeless.compressors import (
     messages_bytes,
 )
 from tokeless.corpora import Corpus, CorpusItem
+from tokeless.eval._utils import percentile
 
 
 @dataclass
@@ -46,6 +47,19 @@ class EvalResult:
         if not self.items:
             return 0.0
         return self.fired_on / len(self.items)
+
+    @property
+    def latency_p50_s(self) -> float:
+        """Median per-item latency in seconds. Computed over CORPUS
+        ITEMS, not message operations — see _utils.percentile docstring.
+        """
+        return percentile([it.stats.latency_s for it in self.items], 50)
+
+    @property
+    def latency_p95_s(self) -> float:
+        """95th percentile per-item latency in seconds. Same item-level
+        granularity as latency_p50_s."""
+        return percentile([it.stats.latency_s for it in self.items], 95)
 
     def format_table(self, tokens_per_second: float = 100.0) -> str:
         lines: list[str] = []
@@ -84,6 +98,11 @@ class EvalResult:
             f"  tokens saved ≈ {t.tokens_saved_estimate} "
             f"(decode @{tokens_per_second:g} tok/s ≈ {decode_s:.2f}s; "
             f"proxy: bytes/4)"
+        )
+        lines.append(
+            f"  latency p50 ≈ {self.latency_p50_s * 1000:.2f} ms, "
+            f"p95 ≈ {self.latency_p95_s * 1000:.2f} ms "
+            f"(computed over corpus items)"
         )
         return "\n".join(lines)
 
