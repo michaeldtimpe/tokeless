@@ -18,17 +18,28 @@ from pathlib import Path
 from tokeless import compressors as compressor_mod
 from tokeless import corpora as corpora_mod
 from tokeless.corpora import Corpus
-from tokeless.corpora.luxe_trace import load_dir as load_luxe_trace_dir
+from tokeless.corpora.luxe_trace import load_dir_with_stats
+from tokeless.eval._utils import format_load_stats_table
 from tokeless.eval.compare import ComparisonThresholds, compare
 from tokeless.eval.runner import run_eval
 
 
 def _resolve_corpus(args: argparse.Namespace) -> Corpus:
+    """Resolve --luxe-trace-dir or registered corpus name.
+
+    For --luxe-trace-dir, runs ingestion accounting and prints the
+    schema-drift table on STDERR when any file has skip_rate > 0.
+    Silence-when-clean: no drift, no output. Stderr keeps it out of
+    `tee`'d stdout captures while remaining visible to the operator.
+    """
     if args.luxe_trace_dir:
         path = Path(args.luxe_trace_dir).expanduser().resolve()
         if not path.is_dir():
             raise SystemExit(f"luxe-trace-dir does not exist: {path}")
-        return load_luxe_trace_dir(path)
+        corpus, stats = load_dir_with_stats(path)
+        if any(s.skip_rate > 0 for s in stats):
+            sys.stderr.write(format_load_stats_table(stats) + "\n")
+        return corpus
     if not args.corpus:
         raise SystemExit("must provide either <corpus> or --luxe-trace-dir")
     return corpora_mod.get(args.corpus)
