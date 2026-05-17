@@ -43,6 +43,32 @@ def test_thresholds_can_be_tuned():
     assert report.verdict == "FAIL"
 
 
+def test_latency_ceiling_fail_branch():
+    """Pins the latency-ceiling FAIL reason (compare.py:155-163).
+
+    Uses 1e-9 (sub-nanosecond) rather than 0.0 — the strict-greater-than
+    check at compare.py:155-156 could theoretically allow a perf_counter
+    measurement of exactly 0.0 to slip past `> 0.0` on coarse clocks; a
+    1ns threshold cannot be met by any real measurement and makes the
+    test's intent explicit.
+    """
+    corpus = get_corpus("git_diff_repeated")
+    thresholds = ComparisonThresholds(max_latency_per_item_s=1e-9)
+    report = compare(corpus, "noop", "exact_hash_dedup", thresholds)
+    assert report.verdict == "FAIL"
+    assert any("latency ceiling" in r for r in report.reasons), report.reasons
+
+
+def test_format_report_includes_total_tokens_saved():
+    """Pins the wall-time proxy footer on the comparison report."""
+    corpus = get_corpus("git_diff_repeated")
+    report = compare(corpus, "noop", "exact_hash_dedup")
+    text = report.format_report(tokens_per_second=200)
+    assert "total tokens saved" in text
+    assert "@200 tok/s" in text
+    assert "proxy: bytes/4" in text
+
+
 def test_format_report_includes_verdict_line():
     corpus = get_corpus("git_diff_repeated")
     report = compare(corpus, "noop", "exact_hash_dedup")

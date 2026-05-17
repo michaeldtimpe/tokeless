@@ -68,6 +68,37 @@ def test_integrity_check_raises_when_compressor_drops_messages():
         run_eval(corpus, "bad_drop")
 
 
+def test_integrity_check_raises_on_role_order_drift():
+    """Pins the role-order branch of _validate_integrity (runner.py:89)."""
+
+    class BadRoleSwap:
+        name = "bad_role_swap"
+
+        def apply(self, messages):
+            if len(messages) >= 2:
+                swapped = [messages[1], messages[0]] + list(messages[2:])
+            else:
+                swapped = list(messages)
+            return swapped, CompressorStats(name=self.name)
+
+    register(BadRoleSwap())
+    corpus = Corpus(
+        name="t",
+        description="",
+        items=[
+            CorpusItem(
+                "i1",
+                [
+                    {"role": "user", "content": "a"},
+                    {"role": "tool", "name": "x", "content": "b"},
+                ],
+            )
+        ],
+    )
+    with pytest.raises(RuntimeError, match="role-order drift"):
+        run_eval(corpus, "bad_role_swap")
+
+
 def test_integrity_check_skipped_when_disabled():
     class StillBad:
         name = "bad_drop_skipped"
@@ -85,6 +116,26 @@ def test_integrity_check_skipped_when_disabled():
     )
     result = run_eval(corpus, "bad_drop_skipped", raise_on_drift=False)
     assert result.items[0].stats.notes  # drift recorded but not raised
+
+
+def test_format_table_includes_tokens_and_decode_seconds():
+    """Pins the wall-time proxy columns and footer."""
+    corpus = Corpus(
+        name="t",
+        description="",
+        items=[
+            CorpusItem(
+                "alpha",
+                [{"role": "tool", "name": "x", "content": "y" * 400}] * 2,
+            )
+        ],
+    )
+    result = run_eval(corpus, "exact_hash_dedup")
+    table = result.format_table(tokens_per_second=50)
+    assert "saved_T" in table
+    assert "tokens saved ≈" in table
+    assert "@50 tok/s" in table
+    assert "proxy: bytes/4" in table
 
 
 def test_format_table_includes_per_item_and_total_rows():

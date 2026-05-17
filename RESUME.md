@@ -17,46 +17,88 @@ luxe would either gate every experiment behind those guardrails (slow) or
 risk perturbing the bench (unsafe). Standalone iteration lets the
 compression space be explored quickly; promotion is gated separately.
 
-## Current state — 2026-05-15
+## Current state — 2026-05-17 (v0.2.0)
 
-v0.1.0 scaffolded. 46 tests passing. CLI working. Two stub compressors
-fire end-to-end against synthetic corpora and produce sensible numbers:
+90 tests passing. CLI working. Five compressors registered. Twelve
+corpora registered (5 baseline + 7 v0.2.0 additions). Tokens-saved
+proxy metric (bytes/4) and decode-time estimate (default 100 tok/s)
+threaded through `EvalResult.format_table()` and
+`ComparisonReport.format_report()`.
+
+Synthetic-corpus baseline numbers (still the only validated workloads):
 - `exact_hash_dedup` vs `noop` on `git_diff_repeated` → PASS, **47.9% bytes saved**
 - `structured_normalize` vs `noop` on `mypy_verbose` → PASS, **29.6% bytes saved**
+- `structural_dedup` vs `exact_hash_dedup` on
+  `git_diff_repeated_shifted` → catches 3/4 hunks (vs 0/4 for exact);
+  bytes saved depends on threshold tuning.
+- `dedup_then_normalize` (canonical chain) registered; numbers
+  available via the CLI.
 
-No remote yet (this `RESUME.md` written before push); see "Git" below.
+**No real luxe-trace measurement yet** — that is the next phase
+(item #5; see "What's next" below and
+`~/.claude/plans/drifting-waddling-scott.md`).
 
 ## What's built
 
 ### Package skeleton
 - `pyproject.toml` — Python ≥3.11, stdlib-only runtime deps, pytest dev extra
 - `src/tokeless/` — layered package (compressors / corpora / eval / cli)
-- `tests/` — 46 tests, pure pytest
+- `tests/` — 90 tests, pure pytest
 
 ### Compressors (`src/tokeless/compressors/`)
 - `__init__.py` — `Message` TypedDict, `CompressorStats` dataclass with
-  `merge()`, `Compressor` protocol, registry (`register/get/names`),
-  `NoOpCompressor` baseline, `compress_messages()` public API,
-  `messages_bytes()` helper.
-- `exact_hash_dedup.py` — **Phase A stub**: replaces byte-identical
-  later occurrences of `role=='tool'` message bodies with a back-reference
-  stub `[duplicate of msg #N tool=X hash=... bytes=...]`. Deterministic.
-  Skips bodies under `min_bytes=32`.
-- `structured_normalize.py` — **Phase B stub**: per-tool normalizer
-  registry. Ships one normalizer (`mypy`) that condenses verbose mypy
-  output to one JSON line per diagnostic, preserving `tool / level /
-  file / line / col / code / msg`. Unknown formats pass through
-  unchanged (no silent drops).
+  `merge()`, `tokens_in_estimate` / `tokens_out_estimate` /
+  `tokens_saved_estimate` properties (bytes/4 proxy), `Compressor`
+  protocol, registry (`register/get/names`), `NoOpCompressor` baseline,
+  `compress_messages()` public API, `messages_bytes()` helper,
+  `BYTES_PER_TOKEN_PROXY` constant, `estimate_tokens()` and
+  `estimate_decode_seconds()` helpers.
+- `exact_hash_dedup.py` — **Phase A**: byte-identical dedup. Replaces
+  later occurrences of `role=='tool'` message bodies with a
+  back-reference stub `[duplicate of msg #N tool=X hash=... bytes=...]`.
+  Deterministic. Skips bodies under `min_bytes=32`.
+- `structural_dedup.py` — **Phase A extension**: normalized-hash dedup.
+  Whitespace-normalized + hunk-anchor-canonicalized fingerprinting.
+  Catches diffs re-emitted with shifted line numbers but identical
+  hunks. Hard non-goals: no internal-whitespace collapse, no
+  blank-line collapse, no case folding, no file-header normalization
+  (cross-file collision guard).
+- `structured_normalize.py` — **Phase B**: per-tool normalizer registry.
+  Ships `mypy` and `ruff` normalizers. Each condenses verbose tool
+  output to one JSON line per diagnostic, preserving tool / level /
+  file / line / col / code / msg. Unknown formats pass through
+  unchanged (no silent drops). Stub-isolation guard skips bodies
+  starting with `[duplicate of msg #...` so dedup → normalize
+  composition is safe.
+- `chain.py` — **Composition**: `ChainCompressor(name, links=[...])`
+  applies links sequentially. Stats accumulated end-to-end
+  (bytes_in / bytes_out = chain boundaries; fires = sum across links;
+  latency end-to-end). Pre-registers `dedup_then_normalize` with the
+  canonical `[StructuralDedupCompressor, StructuredNormalizeCompressor]`
+  order.
 
 ### Corpora (`src/tokeless/corpora/`)
 - `__init__.py` — `CorpusItem`, `Corpus`, registry (`register/get/names`).
-- `synthetic.py` — 5 synthetic corpora targeting the redundancy shapes
-  identified in the design memo:
+- `synthetic.py` — 12 synthetic corpora targeting redundancy shapes
+  from the design memo plus the v0.2.0 additions:
   - `mypy_verbose` — verbose mypy diagnostics (Phase B target)
+  - `ruff_verbose` — verbose ruff diagnostics (Phase B target) [v0.2.0]
   - `git_diff_repeated` — same diff re-emitted across turns (Phase A target)
+  - `git_diff_repeated_shifted` — same diff re-emitted with shifted
+    anchors + trailing-ws drift; demonstrates structural_dedup win
+    over exact_hash_dedup [v0.2.0]
   - `bm25_overlap` — overlapping retrieval hits (Phase A target)
   - `read_file_dup` — duplicate file reads (Phase A target)
+  - `long_session_recall` — 22-turn agent session with deterministic
+    recall-critical UUID; preservation-under-firing test [v0.2.0]
   - `mixed_session` — interleaved roles with multiple redundancy patterns
+  - `adversarial_random_hex` — high-entropy unique blobs; no-fire test [v0.2.0]
+  - `adversarial_unique_tokens` — structurally-similar but unique
+    JSON event lines; no-fire test under realistic shape [v0.2.0]
+  - `adversarial_mypy_lookalike` — mypy-shaped content matching no
+    `_MYPY_LINE`; exercises regex-miss return-unchanged branch [v0.2.0]
+  - `adversarial_ruff_lookalike` — ruff-shaped content matching no
+    `_RUFF_LINE`; same as above for ruff [v0.2.0]
 - `luxe_trace.py` — read-only JSONL adapter. **No luxe import** — purely
   shape-based. Tolerates malformed lines. `load_jsonl(path)` returns one
   `CorpusItem`; `load_dir(directory)` aggregates as one `Corpus`.
@@ -65,8 +107,9 @@ No remote yet (this `RESUME.md` written before push); see "Git" below.
 - `runner.py` — `run_eval(corpus, compressor_id)` applies the compressor
   to every item, aggregates per-item + total stats, enforces structural
   integrity (message count + role order — raises on drift by default).
-  `EvalResult.format_table()` prints a per-item + total table with
-  bytes_in/bytes_out/saved/ratio/latency.
+  `EvalResult.format_table(tokens_per_second=100.0)` prints a per-item
+  + total table with bytes_in / bytes_out / saved / saved_T / ratio /
+  latency plus a footer line with tokens-saved and decode-time proxy.
 - `compare.py` — `compare(corpus, control_id, treatment_id, thresholds)`
   runs both compressors against the same corpus and produces a
   `ComparisonReport` with per-item deltas and a binary `PASS`/`FAIL`
@@ -74,6 +117,8 @@ No remote yet (this `RESUME.md` written before push); see "Git" below.
   - `min_bytes_improvement: 0.20` (treatment must beat control by ≥20%)
   - `min_items_fired: 1`
   - `max_latency_per_item_s: 0.100`
+  `format_report(tokens_per_second=100.0)` includes total tokens saved
+  and decode-time proxy alongside bytes-saved totals.
 
 ### CLI (`src/tokeless/cli.py`)
 - `tokeless compressor list`
@@ -84,25 +129,40 @@ No remote yet (this `RESUME.md` written before push); see "Git" below.
 - `tokeless compare <control> <treatment> --luxe-trace-dir <path>`
 - Compare-mode threshold tuning via `--min-bytes-improvement`,
   `--min-items-fired`, `--max-latency-per-item-s`.
+- Both `eval` and `compare` accept `--tokens-per-second` (default 100.0)
+  for the decode-time proxy.
 - Compare returns exit code 0 on PASS, 1 on FAIL (CI-friendly).
 
 ### Tests (`tests/`)
-46 tests across 7 files. Stdlib-only — no luxe import.
-- `test_compressors_protocol.py` — registry, noop identity, stats math
+90 tests across 9 files. Stdlib-only — no luxe import.
+- `test_compressors_protocol.py` — registry, noop identity, stats math,
+  tokens-saved proxy properties, decode-time guard
 - `test_compressors_exact_hash_dedup.py` — dedup correctness, min_bytes
   threshold, non-tool-role passthrough, three-repeat case, stub fields
-- `test_compressors_structured_normalize.py` — mypy normalizer
-  correctness, error-code preservation, summary-line dropping, unknown-
-  format passthrough, custom-normalizer registration
-- `test_corpora_synthetic.py` — corpora register, are deterministic, have
-  items, redundancy is actually present
+- `test_compressors_structural_dedup.py` — byte-identical wins, shifted
+  anchors (with counts, omitted counts, zero counts), trailing-ws,
+  cross-file collision guard, internal-whitespace guard,
+  line-ending preservation
+- `test_compressors_structured_normalize.py` — mypy + ruff normalizer
+  correctness, error-code preservation, summary-line dropping,
+  unknown-format passthrough, custom-normalizer registration,
+  mypy/ruff lookalike no-match branch
+- `test_compressors_chain.py` — empty chain passthrough, single-link
+  equivalence, two-link boundary accounting, fires aggregation,
+  no caller mutation, idempotency, sub-compressor exception propagation
+- `test_corpora_synthetic.py` — corpora register, deterministic, have
+  items, redundancy is actually present (including adversarial /
+  long-session / shifted-diff corpora)
 - `test_corpora_luxe_trace.py` — JSONL parsing, malformed-line
   tolerance, missing-content fill, multi-file aggregation, empty-dir
 - `test_eval_runner.py` — runner math, integrity check raises on
-  drift (and can be disabled), `format_table` output
+  drift (role-order and message-count branches; can be disabled),
+  `format_table` output (including tokens columns and decode-time footer)
 - `test_eval_compare.py` — verdict logic (passes when justified, fails
-  on no-improvement, fails when nothing fires, threshold tuning)
-- `test_cli.py` — every subcommand, luxe-trace-dir flow, exit codes
+  on no-improvement, fails when nothing fires, threshold tuning,
+  latency-ceiling branch), tokens-saved footer in report
+- `test_cli.py` — every subcommand, luxe-trace-dir flow, exit codes,
+  `--tokens-per-second` flag, threshold-flag plumbing
 
 ## How to run it
 
@@ -124,54 +184,68 @@ python3 -m venv .venv
 
 ## What's next (sequencing follows the design memo's Phase A → F)
 
-### Near-term, code-only — extends what's already there
-1. **Structural Phase A dedup** (whitespace-normalized hash, hunk-anchor
-   stripping). Current `exact_hash_dedup` only catches byte-identical
-   duplicates. Real diffs often re-emit with shifted line numbers but
-   identical hunks; structural fingerprinting captures that without
-   adding generative risk. Hook: add a second compressor
-   (`structural_dedup`) alongside `exact_hash_dedup`; do not modify the
-   existing exact-hash stub (it's the zero-risk floor).
-2. **More Phase B normalizers** (ruff, eslint, git_log, git_show,
-   OSV CVE). Same plug-in shape as the mypy normalizer; each is a
-   `Normalizer = Callable[[str], str]` registered into a fresh
-   `StructuredNormalizeCompressor` instance or merged into the default.
-3. **Adversarial corpora** — content shapes designed to *not* compress
-   (random hex, unique-per-message tokens). Verifies stubs don't drop
-   things they shouldn't. The integrity check in `run_eval` already
-   catches role/message-count drift; adversarial corpora exercise the
-   "no firing when nothing redundant" branch.
-4. **Wall-time proxy metric** in `EvalResult`. Today the harness measures
-   bytes-saved + latency-per-item. To approximate the wall-clock gate
-   that gates luxe rollouts, add a tokens-saved estimate
-   (`bytes_in / 4` or a real tokenizer pass) and a synthetic
-   "decode time saved at N tok/s" line. Useful for translating
-   tokeless verdicts into luxe-relevant talking points.
+### Roadmap status (as of v0.2.0, 2026-05-17)
 
-### Medium-term, harness-level
-5. **Real luxe-trace corpus seeding**. Run a few `luxe maintain` fixtures
-   with `LUXE_LOG_TOOL_CALLS=1`, point `--luxe-trace-dir` at the output,
-   measure savings against real content shape. This is the most
-   important sanity check before considering any luxe-side fold-in.
-6. **Compressor chaining**. Phase A + Phase B together: dedup first
-   (lossless), then normalize what survives. Will need a small
-   composition utility — e.g. `ChainCompressor([dedup, normalize])` —
-   that accumulates stats from each link.
-7. **Confidence-interval reporting**. The memo's measurement section
-   asks for variance bounds. Run the comparison N times against a
-   bootstrapped corpus; report median + naive 95% CI. The
-   per-item determinism of stubs means CI will be near-zero today —
-   the infra is what matters, so chained/learned compressors
-   that introduce variance can be measured cleanly.
+| # | Title | Status |
+|---|-------|--------|
+| 1 | Structural Phase A dedup | **DONE** (`structural_dedup.py`, `git_diff_repeated_shifted` corpus) |
+| 2 | More Phase B normalizers | **PARTIAL** (ruff shipped; eslint, git_log, git_show, OSV-CVE still pending) |
+| 3 | Adversarial corpora | **DONE** (random_hex, unique_tokens, mypy/ruff lookalikes; long_session_recall as inverse-firing complement) |
+| 4 | Wall-time proxy metric | **DONE** (tokens-saved = bytes/4; decode-time at default 100 tok/s; `--tokens-per-second` CLI flag) |
+| 5 | Real luxe-trace seeding | **NEXT PHASE** — see `~/.claude/plans/drifting-waddling-scott.md` |
+| 6 | Compressor chaining | **DONE** (`ChainCompressor`; `dedup_then_normalize` pre-registered) |
+| 7 | Confidence-interval reporting | UNTOUCHED (deferred — per-item determinism makes CI near-zero today) |
+| 8 | Embedding-based Phase C clustering | UNTOUCHED (deferred research) |
+| 9 | Learned token pruning probe (Phase E) | UNTOUCHED (deferred research) |
+| 10 | Promotion checklist | UNTOUCHED (gated on #5 verdict) |
+
+### Near-term — item details retained for context
+
+1. **Structural Phase A dedup** — DONE. Whitespace-normalization +
+   hunk-anchor canonicalization. Conservative: no internal-whitespace
+   collapse, no blank-line collapse, no case folding, no file-header
+   normalization (cross-file collision guard).
+2. **More Phase B normalizers** — PARTIAL. `ruff` (concise format)
+   shipped alongside `mypy`. Remaining: eslint, git_log, git_show,
+   OSV-CVE. Per next-phase plan, these are strictly downstream of
+   item #5 — completing them before real-trace evidence risks adding
+   surface area no workload exercises.
+3. **Adversarial corpora** — DONE. Four adversarial corpora exercise
+   the "no fire" branch:
+   - `adversarial_random_hex` (high-entropy unique)
+   - `adversarial_unique_tokens` (structurally similar, unique)
+   - `adversarial_mypy_lookalike` (regex-miss branch for mypy)
+   - `adversarial_ruff_lookalike` (regex-miss branch for ruff)
+4. **Wall-time proxy metric** — DONE. `bytes/4` proxy on
+   `CompressorStats`. `format_table` and `format_report` both surface
+   tokens-saved + decode-time. `--tokens-per-second` CLI flag tunes
+   the rate without touching the proxy.
+
+### Medium-term
+
+5. **Real luxe-trace corpus seeding** — **NEXT PHASE.** Detailed plan
+   at `~/.claude/plans/drifting-waddling-scott.md`. Four archetype
+   fixtures (lint-heavy, diff-heavy, long-session, hostile) with
+   per-fixture manifest.json, hard schema-drift accounting,
+   savings-per-fire metric, cross-trace contamination check. Verdict
+   routes to one of A (promote → item #10), B (offline-only), or C
+   (pre-elision dominates).
+6. **Compressor chaining** — DONE. `ChainCompressor(name, links=[...])`
+   with end-to-end stats accumulation. Canonical `dedup_then_normalize`
+   pre-registered.
+7. **Confidence-interval reporting** — UNTOUCHED. Out of scope for
+   the next phase; per-item determinism of current compressors makes
+   bootstrapped CI near-zero. Revisit once a non-deterministic
+   compressor (e.g. embedding-based) enters the harness.
 
 ### Long-term, requires research
-8. **Embedding-based Phase C clustering**. Only after deterministic
-   Phase A+B plateau. Requires an embedding model (oMLX or local
-   sentence-transformer); careful guardrails on code/diff content
-   per the memo's hard exclusion.
-9. **Learned token pruning probe (Phase E)**. Only if A–D plateau.
-   Memo positions this as last-resort; the harness should support it
-   for completeness, but expect a negative result.
+8. **Embedding-based Phase C clustering** — UNTOUCHED. Only after
+   deterministic Phase A+B plateau on real traces. Requires an
+   embedding model (oMLX or local sentence-transformer); careful
+   guardrails on code/diff content per the memo's hard exclusion.
+9. **Learned token pruning probe (Phase E)** — UNTOUCHED. Only if
+   A–D plateau. Memo positions this as last-resort; the harness
+   should support it for completeness, but expect a negative result.
 
 ### Bridge to luxe
 10. **Promotion checklist.** When a candidate clears tokeless's tunable
@@ -186,6 +260,19 @@ python3 -m venv .venv
 
 ## Design rationale (so future-you doesn't relitigate)
 
+- **Why "explicit transcript transformation system," not "compressor."**
+  The governing abstraction tokeless commits to is inspectable,
+  deterministic, replayable transcript transformation — not maximal
+  compression ratio. Every output message is an artifact a human or grader
+  can read; every transformation is reproducible; every integrity assertion
+  is exact-match and model-independent. Transformations remain inspectable
+  and policy-explicit whether they are lossless or intentionally
+  lossy-by-policy — the durable invariants are *auditability* and
+  *deterministic replay*, not bit-for-bit reversibility. This is the
+  load-bearing distinction that disqualifies latent-memory approaches
+  (e.g. δ-mem) and decode-acceleration approaches (e.g. Orthrus) without
+  needing to relitigate each one — both trade in opaque model-internal
+  state, which is categorically outside tokeless's contract.
 - **Why standalone instead of inside luxe.** Iterating compressor stubs
   inside luxe would either gate every experiment behind SDD contracts +
   acceptance bench (slow) or risk perturbing grader-sensitive behavior
@@ -246,6 +333,28 @@ python3 -m venv .venv
 - `~/Downloads/luxe/RESUME.md` — luxe production-state document.
   Reference for "what content shape does luxe actually accumulate"
   questions.
+
+### Research-watch references (non-aligned, not planned trajectory)
+
+- **δ-mem** (arxiv 2605.12357) — *"δ-mem: Efficient Online Memory for
+  Large Language Models,"* Lei et al., May 2026. Augments a frozen
+  full-attention backbone with an 8×8 online memory state updated by a
+  delta-rule. Reports 1.10×–1.31× uplift on MemoryAgentBench / LoCoMo.
+  **Not a planned tokeless trajectory** — operates on attention
+  activations, not transcript bytes, so categorically outside the
+  `Compressor.apply(messages)` contract (latent-memory substitution vs
+  explicit transcript transformation). Inspired the
+  `long_session_recall` corpus shape (benchmark idea borrowed, technique
+  rejected). Future luxe-side bookmark belongs near
+  `~/Downloads/luxe/lessons.md:417` — pending separate session.
+- **Orthrus** (github.com/chiennv2000/orthrus) — Dual-view AR + diffusion
+  decoder with shared KV cache and exact intra-model consensus.
+  4.25×–5.36× decode speedup vs EAGLE-3 / DFlash on Qwen3 sizes.
+  **Not for tokeless** — decode-acceleration axis, does not reduce
+  prompt size, KV residency, or upstream context bandwidth. Bookmarked
+  here so future readers don't relitigate; belongs in luxe's
+  speculative-decoding watch list (`~/Downloads/luxe/lessons.md:397-419`
+  neighborhood) — pending separate session.
 
 ## Git
 

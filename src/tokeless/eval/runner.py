@@ -8,6 +8,7 @@ from tokeless.compressors import (
     CompressorStats,
     Message,
     compress_messages,
+    estimate_decode_seconds,
     messages_bytes,
 )
 from tokeless.corpora import Corpus, CorpusItem
@@ -46,11 +47,11 @@ class EvalResult:
             return 0.0
         return self.fired_on / len(self.items)
 
-    def format_table(self) -> str:
+    def format_table(self, tokens_per_second: float = 100.0) -> str:
         lines: list[str] = []
         header = (
             f"{'item':<24} {'fires':>6} {'in_B':>8} {'out_B':>8} "
-            f"{'saved_B':>8} {'ratio':>6} {'lat_ms':>7}"
+            f"{'saved_B':>8} {'saved_T':>8} {'ratio':>6} {'lat_ms':>7}"
         )
         lines.append(header)
         lines.append("-" * len(header))
@@ -59,18 +60,28 @@ class EvalResult:
             lines.append(
                 f"{it.item_id[:24]:<24} {s.fires:>6} "
                 f"{s.bytes_in:>8} {s.bytes_out:>8} {s.bytes_saved:>8} "
+                f"{s.tokens_saved_estimate:>8} "
                 f"{s.compression_ratio:>6.2f} {s.latency_s * 1000:>7.2f}"
             )
         t = self.totals
         lines.append("-" * len(header))
         lines.append(
             f"{'TOTAL':<24} {t.fires:>6} {t.bytes_in:>8} {t.bytes_out:>8} "
-            f"{t.bytes_saved:>8} {t.compression_ratio:>6.2f} "
+            f"{t.bytes_saved:>8} {t.tokens_saved_estimate:>8} "
+            f"{t.compression_ratio:>6.2f} "
             f"{t.latency_s * 1000:>7.2f}"
         )
         lines.append(
             f"  fired on {self.fired_on}/{len(self.items)} item(s) "
             f"({self.firing_rate * 100:.1f}%)"
+        )
+        decode_s = estimate_decode_seconds(
+            t.tokens_saved_estimate, tokens_per_second
+        )
+        lines.append(
+            f"  tokens saved ≈ {t.tokens_saved_estimate} "
+            f"(decode @{tokens_per_second:g} tok/s ≈ {decode_s:.2f}s; "
+            f"proxy: bytes/4)"
         )
         return "\n".join(lines)
 

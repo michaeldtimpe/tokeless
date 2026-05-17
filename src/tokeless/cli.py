@@ -51,7 +51,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
     corpus = _resolve_corpus(args)
     result = run_eval(corpus, args.compressor)
     print(f"corpus: {corpus.name}  compressor: {args.compressor}")
-    print(result.format_table())
+    print(result.format_table(tokens_per_second=args.tokens_per_second))
     return 0
 
 
@@ -63,7 +63,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
         max_latency_per_item_s=args.max_latency_per_item_s,
     )
     report = compare(corpus, args.control, args.treatment, thresholds)
-    print(report.format_report())
+    print(report.format_report(tokens_per_second=args.tokens_per_second))
     return 0 if report.verdict == "PASS" else 1
 
 
@@ -98,6 +98,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval = sub.add_parser("eval", help="run one compressor over one corpus")
     p_eval.add_argument("compressor", help="registered compressor name")
     _add_corpus_args(p_eval)
+    p_eval.add_argument(
+        "--tokens-per-second", type=float, default=100.0,
+        help="rate for the synthetic decode-time estimate (default 100)",
+    )
     p_eval.set_defaults(fn=cmd_eval)
 
     p_compare = sub.add_parser("compare", help="paired comparison + verdict")
@@ -107,6 +111,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_compare.add_argument("--min-bytes-improvement", type=float, default=0.20)
     p_compare.add_argument("--min-items-fired", type=int, default=1)
     p_compare.add_argument("--max-latency-per-item-s", type=float, default=0.100)
+    p_compare.add_argument(
+        "--tokens-per-second", type=float, default=100.0,
+        help="rate for the synthetic decode-time estimate (default 100)",
+    )
     p_compare.set_defaults(fn=cmd_compare)
 
     return parser

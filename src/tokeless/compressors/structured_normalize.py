@@ -44,6 +44,24 @@ _MYPY_LINE = re.compile(
     r"(?:\s+\[(?P<code>[a-z][a-z0-9-]*)\])?$"
 )
 
+# Matches ruff's CONCISE output format (the default). Ruff's JSON output
+# mode (--output-format=json) is a different shape and is explicitly out
+# of scope.
+#
+# POSIX-only: [^:\n]+ stops at the first colon, which breaks Windows
+# drive-letter paths like `C:\foo\bar.py`. Such lines fall into the
+# "no match → identity" branch (graceful pass-through, not corruption).
+#
+# Rule-code class [A-Z]{1,5}\d{1,5} is deliberately permissive to cover
+# E (pycodestyle), F (pyflakes), UP (pyupgrade), RUF, B (bugbear), S
+# (bandit), PT (pytest), and more. Surrounding format constraints
+# (path:line:col: preceding, space-message-EOL trailing) keep false
+# positives unlikely.
+_RUFF_LINE = re.compile(
+    r"^(?P<file>[^:\n]+):(?P<line>\d+):(?P<col>\d+):\s+"
+    r"(?P<code>[A-Z]{1,5}\d{1,5})\s+(?P<msg>.+)$"
+)
+
 
 def _normalize_mypy(content: str) -> str:
     """Condense mypy verbose output to one JSON line per diagnostic.
@@ -95,6 +113,54 @@ def _normalize_mypy(content: str) -> str:
     return "\n".join(json.dumps(d, separators=(",", ":")) for d in diagnostics)
 
 
+def _normalize_ruff(content: str) -> str:
+    """Condense ruff concise output to one JSON line per diagnostic.
+
+    Keeps every matching `path:line:col: CODE message` line as a compact
+    JSON object. Drops the trailing `Found N error(s)` summary, multi-line
+    snippet blocks (lines starting with `  |`), and `help: ...` follow-up
+    lines.
+
+    Returns input unchanged on zero matches — same hard rule as
+    `_normalize_mypy`. When at least one diagnostic IS captured, all
+    non-matching non-summary lines in the message are dropped (a test
+    pins this swallow behavior as an explicit contract).
+    """
+    diagnostics: list[dict[str, str | int]] = []
+    matched_any = False
+
+    for raw in content.splitlines():
+        line = raw.rstrip()
+        if not line:
+            continue
+        if line.startswith("Found ") and "error" in line:
+            matched_any = True
+            continue
+        # Snippet block lines like `  | x = 'a' * 89` and `  | ^^ E501`.
+        if line.startswith("  |"):
+            continue
+        # `help: ...` follow-up lines (after optional leading whitespace).
+        if line.lstrip().startswith("help:"):
+            continue
+        m = _RUFF_LINE.match(line)
+        if not m:
+            continue
+        matched_any = True
+        entry: dict[str, str | int] = {
+            "tool": "ruff",
+            "file": m.group("file"),
+            "line": int(m.group("line")),
+            "col": int(m.group("col")),
+            "code": m.group("code"),
+            "msg": m.group("msg").strip(),
+        }
+        diagnostics.append(entry)
+
+    if not matched_any or not diagnostics:
+        return content
+    return "\n".join(json.dumps(d, separators=(",", ":")) for d in diagnostics)
+
+
 @dataclass
 class StructuredNormalizeCompressor:
     """Dispatch per-tool normalizers based on the tool-role message's `name`.
@@ -106,7 +172,10 @@ class StructuredNormalizeCompressor:
 
     name: str = "structured_normalize"
     normalizers: dict[str, Normalizer] = field(
-        default_factory=lambda: {"mypy": _normalize_mypy}
+        default_factory=lambda: {
+            "mypy": _normalize_mypy,
+            "ruff": _normalize_ruff,
+        }
     )
 
     def apply(
@@ -122,12 +191,19 @@ class StructuredNormalizeCompressor:
             if msg.get("role") != "tool":
                 out.append(msg)
                 continue
+            content = msg.get("content", "") or ""
+            # Stub-isolation guard: dedup compressors emit back-reference
+            # stubs that share a known prefix. Skip them globally so the
+            # behavior does not depend on each normalizer's regex
+            # happening to miss the stub shape.
+            if content.startswith("[duplicate of msg #"):
+                out.append(msg)
+                continue
             tool_name = msg.get("name") or ""
             normalizer = self.normalizers.get(tool_name)
             if normalizer is None:
                 out.append(msg)
                 continue
-            content = msg.get("content", "") or ""
             normalized = normalizer(content)
             if normalized is content or normalized == content:
                 out.append(msg)

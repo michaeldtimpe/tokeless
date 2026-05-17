@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from tokeless.compressors import estimate_decode_seconds, estimate_tokens
 from tokeless.corpora import Corpus
 from tokeless.eval.runner import EvalResult, run_eval
 
@@ -60,7 +61,7 @@ class ComparisonReport:
             self.control.totals.bytes_out - self.treatment.totals.bytes_out
         ) / ctl
 
-    def format_report(self) -> str:
+    def format_report(self, tokens_per_second: float = 100.0) -> str:
         lines: list[str] = []
         lines.append(
             f"=== {self.treatment_id} vs {self.control_id} "
@@ -81,10 +82,19 @@ class ComparisonReport:
                 f"{d.treatment_latency_s * 1000:>7.2f}"
             )
         lines.append("-" * len(header))
+        total_bytes_saved = (
+            self.control.totals.bytes_in - self.treatment.totals.bytes_out
+        )
         lines.append(
-            f"  total bytes saved: "
-            f"{self.control.totals.bytes_in - self.treatment.totals.bytes_out} "
+            f"  total bytes saved: {total_bytes_saved} "
             f"({self.total_pct_saved * 100:.1f}%)"
+        )
+        tokens_saved = estimate_tokens(total_bytes_saved)
+        decode_s = estimate_decode_seconds(tokens_saved, tokens_per_second)
+        lines.append(
+            f"  total tokens saved ≈ {tokens_saved} "
+            f"(decode @{tokens_per_second:g} tok/s ≈ {decode_s:.2f}s; "
+            f"proxy: bytes/4)"
         )
         lines.append(
             f"  treatment fired on "

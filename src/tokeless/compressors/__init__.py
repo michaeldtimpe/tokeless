@@ -44,6 +44,18 @@ class CompressorStats:
             return 1.0
         return self.bytes_out / self.bytes_in
 
+    @property
+    def tokens_in_estimate(self) -> int:
+        return estimate_tokens(self.bytes_in)
+
+    @property
+    def tokens_out_estimate(self) -> int:
+        return estimate_tokens(self.bytes_out)
+
+    @property
+    def tokens_saved_estimate(self) -> int:
+        return self.tokens_in_estimate - self.tokens_out_estimate
+
     def merge(self, other: "CompressorStats") -> None:
         self.fires += other.fires
         self.messages_in += other.messages_in
@@ -62,6 +74,33 @@ class Compressor(Protocol):
     def apply(
         self, messages: list[Message]
     ) -> tuple[list[Message], CompressorStats]: ...
+
+
+# Conservative bytes-to-tokens proxy. Matches the rule-of-thumb cited in
+# RESUME.md item #4: ~4 bytes/token for typical English-ish tool output.
+# Real ratios vary by content shape (hex blobs ≈ 2:1; dense JSON ≈ 3:1;
+# English prose ≈ 4:1; code is mixed). The proxy is intentionally a
+# single value so the number is deterministic and dependency-free; a
+# real tokenizer (tiktoken / sentence-transformers) would be
+# model-specific and is deferred.
+BYTES_PER_TOKEN_PROXY = 4
+
+
+def estimate_tokens(byte_count: int) -> int:
+    """Bytes → token-count proxy. Deterministic, no dependencies."""
+    return byte_count // BYTES_PER_TOKEN_PROXY
+
+
+def estimate_decode_seconds(tokens: int, tokens_per_second: float) -> float:
+    """Tokens → wall-clock decode estimate at a given tok/s rate.
+
+    Guards against zero or negative rate by returning 0.0 — the caller
+    is expected to surface "no estimate available" in that case rather
+    than propagate nonsense.
+    """
+    if tokens_per_second <= 0:
+        return 0.0
+    return tokens / tokens_per_second
 
 
 _REGISTRY: dict[str, Compressor] = {}
@@ -150,3 +189,5 @@ register(NoOpCompressor())
 # Side-effect registrations of bundled compressors.
 from tokeless.compressors import exact_hash_dedup as _exact_hash_dedup  # noqa: E402,F401
 from tokeless.compressors import structured_normalize as _structured_normalize  # noqa: E402,F401
+from tokeless.compressors import structural_dedup as _structural_dedup  # noqa: E402,F401
+from tokeless.compressors import chain as _chain  # noqa: E402,F401

@@ -1,8 +1,11 @@
 from tokeless import compressors as cmod
 from tokeless.compressors import (
+    BYTES_PER_TOKEN_PROXY,
     CompressorStats,
     NoOpCompressor,
     compress_messages,
+    estimate_decode_seconds,
+    estimate_tokens,
     messages_bytes,
 )
 
@@ -55,6 +58,28 @@ def test_compressor_stats_merge_accumulates():
     assert a.bytes_out == 230
     assert abs(a.latency_s - 0.03) < 1e-9
     assert a.bytes_saved == 70
+
+
+def test_tokens_estimate_uses_bytes_per_token_proxy():
+    assert BYTES_PER_TOKEN_PROXY == 4
+    assert estimate_tokens(100) == 25
+    assert estimate_tokens(0) == 0
+    assert estimate_tokens(3) == 0  # integer floor
+
+
+def test_compressor_stats_tokens_properties():
+    s = CompressorStats(name="x", bytes_in=400, bytes_out=200)
+    assert s.tokens_in_estimate == 100
+    assert s.tokens_out_estimate == 50
+    assert s.tokens_saved_estimate == 50
+
+
+def test_decode_seconds_handles_zero_or_negative_rate():
+    """Guard against division by zero / nonsense rates."""
+    assert estimate_decode_seconds(100, 0) == 0.0
+    assert estimate_decode_seconds(100, -1.0) == 0.0
+    assert estimate_decode_seconds(100, 100.0) == 1.0
+    assert estimate_decode_seconds(50, 100.0) == 0.5
 
 
 def test_double_registration_rejected():
