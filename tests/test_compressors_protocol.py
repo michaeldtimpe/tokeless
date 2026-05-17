@@ -74,6 +74,26 @@ def test_compressor_stats_tokens_properties():
     assert s.tokens_saved_estimate == 50
 
 
+def test_bytes_saved_per_fire_zero_when_no_fires():
+    """Guard against division by zero. fires=0 → 0, never raises."""
+    s = CompressorStats(name="x", bytes_in=400, bytes_out=400, fires=0)
+    assert s.bytes_saved == 0
+    assert s.bytes_saved_per_fire == 0
+
+
+def test_bytes_saved_per_fire_floor_division():
+    """fires>0 → integer floor division. 230 // 4 == 57 (remainder 2)."""
+    s = CompressorStats(name="x", bytes_in=400, bytes_out=170, fires=4)
+    assert s.bytes_saved == 230
+    assert s.bytes_saved_per_fire == 57
+
+
+def test_bytes_saved_per_fire_exact_division():
+    """No remainder case for clarity."""
+    s = CompressorStats(name="x", bytes_in=400, bytes_out=200, fires=2)
+    assert s.bytes_saved_per_fire == 100
+
+
 def test_decode_seconds_handles_zero_or_negative_rate():
     """Guard against division by zero / nonsense rates."""
     assert estimate_decode_seconds(100, 0) == 0.0

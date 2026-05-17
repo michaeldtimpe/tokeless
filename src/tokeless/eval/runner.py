@@ -51,7 +51,8 @@ class EvalResult:
         lines: list[str] = []
         header = (
             f"{'item':<24} {'fires':>6} {'in_B':>8} {'out_B':>8} "
-            f"{'saved_B':>8} {'saved_T':>8} {'ratio':>6} {'lat_ms':>7}"
+            f"{'saved_B':>8} {'saved_T':>8} {'avg_B/fire':>10} "
+            f"{'ratio':>6} {'lat_ms':>7}"
         )
         lines.append(header)
         lines.append("-" * len(header))
@@ -60,7 +61,7 @@ class EvalResult:
             lines.append(
                 f"{it.item_id[:24]:<24} {s.fires:>6} "
                 f"{s.bytes_in:>8} {s.bytes_out:>8} {s.bytes_saved:>8} "
-                f"{s.tokens_saved_estimate:>8} "
+                f"{s.tokens_saved_estimate:>8} {s.bytes_saved_per_fire:>10} "
                 f"{s.compression_ratio:>6.2f} {s.latency_s * 1000:>7.2f}"
             )
         t = self.totals
@@ -68,6 +69,7 @@ class EvalResult:
         lines.append(
             f"{'TOTAL':<24} {t.fires:>6} {t.bytes_in:>8} {t.bytes_out:>8} "
             f"{t.bytes_saved:>8} {t.tokens_saved_estimate:>8} "
+            f"{t.bytes_saved_per_fire:>10} "
             f"{t.compression_ratio:>6.2f} "
             f"{t.latency_s * 1000:>7.2f}"
         )

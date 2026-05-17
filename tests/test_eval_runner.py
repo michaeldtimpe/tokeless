@@ -138,6 +138,27 @@ def test_format_table_includes_tokens_and_decode_seconds():
     assert "proxy: bytes/4" in table
 
 
+def test_format_table_includes_avg_bytes_per_fire_column():
+    """Pins the avg_B/fire column placement (between saved_T and ratio)."""
+    corpus = Corpus(
+        name="t",
+        description="",
+        items=[
+            CorpusItem(
+                "alpha",
+                [{"role": "tool", "name": "x", "content": "y" * 400}] * 2,
+            )
+        ],
+    )
+    result = run_eval(corpus, "exact_hash_dedup")
+    table = result.format_table()
+    assert "avg_B/fire" in table
+    # Placement: avg_B/fire appears AFTER saved_T and BEFORE ratio
+    header_line = table.splitlines()[0]
+    assert header_line.index("saved_T") < header_line.index("avg_B/fire")
+    assert header_line.index("avg_B/fire") < header_line.index("ratio")
+
+
 def test_format_table_includes_per_item_and_total_rows():
     corpus = Corpus(
         name="t",

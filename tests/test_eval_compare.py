@@ -69,6 +69,19 @@ def test_format_report_includes_total_tokens_saved():
     assert "proxy: bytes/4" in text
 
 
+def test_format_report_includes_avg_savings_per_fire():
+    """Pins the avg-savings-per-fire footer. The 'avg' prefix is
+    load-bearing — 'savings per fire' alone can be misread as
+    cumulative."""
+    corpus = get_corpus("git_diff_repeated")
+    report = compare(corpus, "noop", "exact_hash_dedup")
+    text = report.format_report()
+    assert "avg savings per fire" in text
+    # Numeric value present (not blank) — uses the treatment totals
+    expected = report.treatment.totals.bytes_saved_per_fire
+    assert f"≈ {expected} B" in text
+
+
 def test_format_report_includes_verdict_line():
     corpus = get_corpus("git_diff_repeated")
     report = compare(corpus, "noop", "exact_hash_dedup")

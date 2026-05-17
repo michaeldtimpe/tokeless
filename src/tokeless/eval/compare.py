@@ -97,6 +97,10 @@ class ComparisonReport:
             f"proxy: bytes/4)"
         )
         lines.append(
+            f"  treatment avg savings per fire ≈ "
+            f"{self.treatment.totals.bytes_saved_per_fire} B"
+        )
+        lines.append(
             f"  treatment fired on "
             f"{self.treatment.fired_on}/{len(self.treatment.items)} items "
             f"({self.treatment.firing_rate * 100:.1f}%)"

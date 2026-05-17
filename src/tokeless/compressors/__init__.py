@@ -39,6 +39,22 @@ class CompressorStats:
         return self.bytes_in - self.bytes_out
 
     @property
+    def bytes_saved_per_fire(self) -> int:
+        """Average bytes saved per firing event. Floor-division integer
+        for display; returns 0 when fires == 0.
+
+        Phase 2 Step 3 calls this out as the metric that separates
+        "913 fires × 131B each" (probably not worth integration
+        complexity) from "4 fires × 525KB each" (probably worth it).
+
+        Note: an "expanding" compressor (bytes_saved < 0) would
+        produce a misleading negative under floor division. None of
+        the registered compressors expand today; if a future one
+        does, this property should grow a clamp or sentinel.
+        """
+        return self.bytes_saved // self.fires if self.fires else 0
+
+    @property
     def compression_ratio(self) -> float:
         if self.bytes_in == 0:
             return 1.0
