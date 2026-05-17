@@ -18,6 +18,7 @@ from pathlib import Path
 from tokeless import compressors as compressor_mod
 from tokeless import corpora as corpora_mod
 from tokeless.corpora import Corpus
+from tokeless.corpora.luxe_simulate import write_archetype_bundle
 from tokeless.corpora.luxe_trace import load_dir_with_stats
 from tokeless.eval._utils import format_load_stats_table
 from tokeless.eval.compare import ComparisonThresholds, compare
@@ -78,6 +79,20 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 0 if report.verdict == "PASS" else 1
 
 
+def cmd_dev_simulate_luxe_traces(args: argparse.Namespace) -> int:
+    """Write four synthetic archetype trace bundles. NOT real data —
+    see luxe_simulate.py docstring for the anti-conflation note.
+    """
+    root = Path(args.output_dir).expanduser().resolve()
+    written = write_archetype_bundle(root, seed=args.seed)
+    print(f"wrote {len(written)} archetype bundles under {root}")
+    for archetype, jsonl in sorted(written.items()):
+        print(f"  {archetype:<14} {jsonl}")
+    print("(synthetic — NOT real luxe traces; see manifest.json "
+          "'synthetic: true')")
+    return 0
+
+
 def _add_corpus_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "corpus",
@@ -127,6 +142,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="rate for the synthetic decode-time estimate (default 100)",
     )
     p_compare.set_defaults(fn=cmd_compare)
+
+    # `dev` namespace: diagnostic / non-production tooling. Keep this
+    # narrow — once a dev namespace exists it tends to become a
+    # dumping ground.
+    p_dev = sub.add_parser("dev", help="diagnostic tooling (non-production)")
+    p_dev_sub = p_dev.add_subparsers(dest="subcmd", required=True)
+    p_dev_sim = p_dev_sub.add_parser(
+        "simulate-luxe-traces",
+        help="write four synthetic luxe-trace archetype bundles "
+             "(NOT real data — for harness validation only)",
+    )
+    p_dev_sim.add_argument(
+        "--output-dir",
+        default="traces/_synthetic/",
+        help="destination root (default: traces/_synthetic/)",
+    )
+    p_dev_sim.add_argument(
+        "--seed", type=int, default=0,
+        help="seed for the deterministic hostile-archetype RNG (default 0)",
+    )
+    p_dev_sim.set_defaults(fn=cmd_dev_simulate_luxe_traces)
 
     return parser
 

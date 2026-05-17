@@ -114,3 +114,84 @@ def test_compare_threshold_flag_changes_verdict(capsys):
     )
     assert strict_rc == 1
     assert "VERDICT: FAIL" in strict_out
+
+
+def test_dev_simulate_luxe_traces_exit_zero(tmp_path, capsys):
+    """Smoke test: command runs without error."""
+    rc, out, _ = _run(
+        ["dev", "simulate-luxe-traces", "--output-dir", str(tmp_path)],
+        capsys,
+    )
+    assert rc == 0
+    assert "wrote 4 archetype bundles" in out
+    # Anti-conflation footer must be visible in CLI output
+    assert "synthetic" in out.lower()
+
+
+def test_dev_simulate_luxe_traces_creates_bundle(tmp_path, capsys):
+    """Output directory has 4 archetype subdirs each with .jsonl + manifest."""
+    rc, _out, _err = _run(
+        ["dev", "simulate-luxe-traces", "--output-dir", str(tmp_path)],
+        capsys,
+    )
+    assert rc == 0
+    subdirs = sorted(p.name for p in tmp_path.iterdir() if p.is_dir())
+    assert subdirs == [
+        "archetype_diff_heavy",
+        "archetype_hostile",
+        "archetype_lint_heavy",
+        "archetype_long_session",
+    ]
+    for sub in subdirs:
+        subdir = tmp_path / sub
+        # one .jsonl + manifest.json each
+        assert any(p.suffix == ".jsonl" for p in subdir.iterdir())
+        assert (subdir / "manifest.json").exists()
+
+
+def test_dev_simulate_luxe_traces_seed_changes_output(tmp_path, capsys):
+    """--seed flag is wired through and affects (at least) hostile."""
+    _run(
+        ["dev", "simulate-luxe-traces",
+         "--output-dir", str(tmp_path / "a"), "--seed", "1"],
+        capsys,
+    )
+    _run(
+        ["dev", "simulate-luxe-traces",
+         "--output-dir", str(tmp_path / "b"), "--seed", "2"],
+        capsys,
+    )
+    a = (tmp_path / "a" / "archetype_hostile" / "hostile.jsonl").read_bytes()
+    b = (tmp_path / "b" / "archetype_hostile" / "hostile.jsonl").read_bytes()
+    assert a != b
+
+
+def test_resolve_corpus_emits_drift_on_stderr(tmp_path, capsys):
+    """When --luxe-trace-dir has skip_rate > 0 on any file, the
+    schema-drift table prints on stderr. The CLI hook lives in
+    _resolve_corpus; verify end-to-end via the eval subcommand."""
+    (tmp_path / "drifty.jsonl").write_text(
+        '{"event": "telemetry"}\n'
+        '{"role": "user", "content": "hi"}\n'
+    )
+    rc, _out, err = _run(
+        ["eval", "noop", "--luxe-trace-dir", str(tmp_path)],
+        capsys,
+    )
+    assert rc == 0
+    assert "schema-drift accounting" in err
+    assert "drifty.jsonl" in err
+
+
+def test_resolve_corpus_silent_on_clean_traces(tmp_path, capsys):
+    """No drift, no stderr — silence-when-clean policy."""
+    (tmp_path / "clean.jsonl").write_text(
+        '{"role": "user", "content": "hi"}\n'
+        '{"role": "tool", "name": "x", "content": "y"}\n'
+    )
+    rc, _out, err = _run(
+        ["eval", "noop", "--luxe-trace-dir", str(tmp_path)],
+        capsys,
+    )
+    assert rc == 0
+    assert "schema-drift accounting" not in err
